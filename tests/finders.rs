@@ -314,3 +314,36 @@ fn the_database_sheet_is_read_by_address_then_by_hash() {
     assert_eq!(db.get_seed("elsewhere", 1), None);
     assert_eq!(post_body("a b/1:2", "overworld", -5, "1.21.3", "Steve", true), "serverIp=a+b%2F1%3A2&dimension=overworld&seed=-5L&version=1.21.3&username=Steve&hash=1");
 }
+
+/// A development helper: the blocks of a pyramid the game generated (HORIZON_PYRAMID_BLOCKS, from horizon-ctl blocks) against
+/// what the finder expects for each facing at the given origin.
+#[test]
+#[ignore]
+fn pyramid_of_the_game_against_the_finder() {
+    let Ok(path) = std::env::var("HORIZON_PYRAMID_BLOCKS") else { return };
+    let text = std::fs::read_to_string(path).unwrap();
+    let mut world: HashMap<(i32, i32, i32), String> = HashMap::new();
+    for line in text.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        if f.len() == 4 {
+            world.insert((f[0].parse().unwrap(), f[1].parse().unwrap(), f[2].parse().unwrap()), f[3].to_owned());
+        }
+    }
+    let origin = (-2464, 70, 1664);
+    for d in Direction::HORIZONTAL {
+        let piece = piece_of(PieceKind::Piece, d, [21, 15, 21], dsl::desert_pyramid);
+        let mut bad = 0;
+        let mut shown = Vec::new();
+        for (key, block) in piece.blocks() {
+            let p = (origin.0 + key.x, origin.1 + key.y, origin.2 + key.z);
+            let actual = world.get(&p).map(String::as_str).unwrap_or("air");
+            if actual != *block {
+                bad += 1;
+                if shown.len() < 12 {
+                    shown.push(format!("{key:?} expects {block} has {actual}"));
+                }
+            }
+        }
+        println!("{d:?}: {} blocks expected, {bad} differ {shown:#?}", piece.blocks().len());
+    }
+}

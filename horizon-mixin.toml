@@ -134,6 +134,18 @@ file = "crates/horizon-client/src/game.rs"
 name = "scx_lang"
 source = "src/config/lang.rs"
 
+[[module]]
+id = "mod_scx_structure_save"
+file = "crates/horizon-client/src/game.rs"
+name = "scx_structure_save"
+source = "src/config/structure_save.rs"
+
+[[module]]
+id = "mod_scx_database"
+file = "crates/horizon-client/src/game.rs"
+name = "scx_database"
+source = "src/config/database.rs"
+
 # The part that touches the game.
 [[module]]
 id = "mod_scx_game"

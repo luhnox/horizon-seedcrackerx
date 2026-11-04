@@ -255,7 +255,7 @@ struct State {
     store: Arc<ChunkStore>,
     level: Option<Arc<GameLevel>>,
     /// The chunks the finders have been given, and the revision of the game's chunks they were read at.
-    seen: HashSet<(i32, i32)>,
+    seen: HashMap<(i32, i32), u64>,
     revision: u64,
     last_refresh: u64,
     /// What the session was when last looked at: the dimension and the hash of the seed.
@@ -295,7 +295,7 @@ impl State {
             table: Arc::new(StateTable::build(game)),
             store: Arc::new(ChunkStore::default()),
             level: None,
-            seen: HashSet::new(),
+            seen: HashMap::new(),
             revision: u64::MAX,
             last_refresh: 0,
             session: None,
@@ -332,7 +332,11 @@ impl State {
             "minecraft:the_end" => Dimension::End,
             _ => Dimension::Overworld,
         };
-        let names: Vec<&'static str> = super::world_biomes!(game).list.iter().map(|b| intern(bare(&b.name))).collect();
+        let biome_table = match &game.world_biomes {
+            Some(b) => b,
+            None => game.res.biomes(),
+        };
+        let names: Vec<&'static str> = biome_table.list.iter().map(|b| intern(bare(&b.name))).collect();
         self.level = Some(Arc::new(GameLevel { store: self.store.clone(), table: self.table.clone(), biome_names: Arc::new(names), dimension: kind, air: game.world.air.0 }));
         let poke: DataAddedEvent = Arc::new(|s: &DataStorage| s.get_time_machine().poke(s, Some(Phase::Biomes)));
         let (active, debug) = {
@@ -357,7 +361,7 @@ impl State {
         };
         let hashed = match game.remote.as_ref() {
             Some(r) => r.hashed_seed,
-            None => world_seed::to_hash(game.seed),
+            None => world_seed::to_hash(game.level.seed),
         };
         let key = (player.dimension.to_string(), hashed);
         if self.session.as_ref() != Some(&key) {
@@ -375,15 +379,16 @@ impl State {
             return;
         }
         self.last_refresh = game.ticks;
-        let mut arrived = Vec::new();
+        let mut arrived: Vec<(i32, i32)> = Vec::new();
         {
             let mut store = self.store.chunks.write().unwrap_or_else(|e| e.into_inner());
             if revision != self.revision {
                 let present: HashSet<(i32, i32)> = game.world.chunks.keys().copied().collect();
                 store.retain(|k, _| present.contains(k));
-                self.seen.retain(|k| present.contains(k));
+                self.seen.retain(|k, _| present.contains(k));
                 for k in &present {
-                    if !self.seen.contains(k) {
+                    if !self.seen.contains_key(k) {
+                        self.seen.insert(*k, game.ticks);
                         arrived.push(*k);
                     }
                 }
@@ -391,7 +396,12 @@ impl State {
             for (k, c) in &game.world.chunks {
                 match store.get(k) {
                     Some(old) if Arc::ptr_eq(old, c) => {}
-                    _ => {
+                    old => {
+                        // A server sends a chunk whole. The game's own world finishes a chunk after it shows (the structures come
+                        // with the decoration), so a chunk that changes soon after it arrived is given to the finders again.
+                        if old.is_some() && !arrived.contains(k) && game.ticks.saturating_sub(self.seen.get(k).copied().unwrap_or(0)) <= 600 {
+                            arrived.push(*k);
+                        }
                         store.insert(*k, c.clone());
                     }
                 }
@@ -402,9 +412,6 @@ impl State {
             return;
         }
         arrived.sort_unstable();
-        for k in &arrived {
-            self.seen.insert(*k);
-        }
         self.run_finders(&arrived);
     }
 
