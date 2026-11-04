@@ -347,3 +347,21 @@ fn pyramid_of_the_game_against_the_finder() {
         println!("{d:?}: {} blocks expected, {bad} differ {shown:#?}", piece.blocks().len());
     }
 }
+
+#[test]
+fn a_plant_grown_over_an_air_cell_of_a_pyramid_does_not_hide_it() {
+    // Measured on a generated world: dry grass stood where the structure holds air and the exact compare missed the pyramid.
+    let ctx = context();
+    let level = MockLevel::new(Dimension::Overworld, "desert");
+    let chunk = ChunkPos::new(-7, 12);
+    let center = BlockPos::new(chunk.x * 16, 70, chunk.z * 16);
+    let piece = piece_of(PieceKind::Piece, Direction::West, [21, 15, 21], dsl::desert_pyramid);
+    place(&level, &piece, center);
+    let air = piece.blocks().iter().find(|(_, b)| *b == "air").map(|(k, _)| center.offset_pos(*k)).unwrap();
+    level.set(air.x, air.y, air.z, "short_dry_grass");
+    let found: Vec<BlockPos> = TempleFinder::create_desert_pyramid(&ctx, &level, chunk).into_iter().flat_map(|mut f| f.find_in_chunk(&ctx, &level)).collect();
+    assert!(found.contains(&center));
+    level.set(air.x, air.y, air.z, "stone");
+    let found: Vec<BlockPos> = TempleFinder::create_desert_pyramid(&ctx, &level, chunk).into_iter().flat_map(|mut f| f.find_in_chunk(&ctx, &level)).collect();
+    assert!(!found.contains(&center));
+}

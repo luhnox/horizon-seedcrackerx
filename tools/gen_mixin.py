@@ -56,6 +56,9 @@ def hook(id_, target, helper, bindings, cancellable=False, kind='HEAD'):
 hook('tick', "horizon_client::game::native_hooks::Game<'_>::native_tick", 'tick', [('game', '&mut crate::game::Game<\'_>', '&mut *self')])
 hook('command', "horizon_client::game::native_hooks::Game<'_>::native_command", 'command', [('game', '&mut crate::game::Game<\'_>', '&mut *self'), ('command', '&str', 'command'), ('ran', '&mut bool', 'ran')])
 hook('commands', "horizon_client::game::native_hooks::Game<'_>::native_commands", 'commands', [('commands', "&mut Vec<&'static str>", 'commands')])
+hook('list', "horizon_client::game::native_hooks::Game<'_>::native_mods", 'list', [('mods', '&mut Vec<crate::game::native_hooks::NativeMod>', '&mut *mods')])
+hook('settings', "horizon_client::game::native_hooks::Game<'_>::native_settings", 'settings', [('game', "&mut crate::game::Game<'_>", '&mut *self'), ('mod_id', '&str', 'mod_id'), ('buttons', '&mut Vec<String>', '&mut *buttons')])
+hook('click', "horizon_client::game::native_hooks::Game<'_>::native_settings_click", 'click', [('game', "&mut crate::game::Game<'_>", '&mut *self'), ('mod_id', '&str', 'mod_id'), ('button', 'usize', 'button')])
 hook('gizmos', "horizon_client::game::debug_renderers::Game<'_>::debug_renderer_gizmos", 'gizmos', [('gizmos', '&mut horizon_client::gizmos::Gizmos', 'g')])
 
 open(os.path.join(ROOT, 'horizon-mixin.toml'), 'w', encoding='utf-8', newline='\n').write('\n'.join(out))
@@ -83,6 +86,26 @@ fn scx_command(game: &mut crate::game::Game<'_>, command: &str, ran: &mut bool) 
 helper('commands', '''// The commands the chat box completes as the game's own.
 fn scx_commands(commands: &mut Vec<&'static str>) {
     crate::game::scx_game::commands(commands);
+}
+''')
+helper('list', '''// SeedCrackerX's row in Options > Mods.
+fn scx_listed(mods: &mut Vec<crate::game::native_hooks::NativeMod>) {
+    let (id, title, description) = crate::game::scx_game::listed();
+    mods.push(crate::game::native_hooks::NativeMod { id, title, description, keys: Vec::new() });
+}
+''')
+helper('settings', '''// SeedCrackerX's page: the buttons of its screen.
+fn scx_page(game: &mut crate::game::Game<'_>, mod_id: &str, buttons: &mut Vec<String>) {
+    if mod_id == crate::game::scx_game::ID {
+        buttons.extend(crate::game::scx_game::page_labels(game));
+    }
+}
+''')
+helper('click', '''// A click on a button of SeedCrackerX's page.
+fn scx_click(game: &mut crate::game::Game<'_>, mod_id: &str, button: usize) {
+    if mod_id == crate::game::scx_game::ID {
+        crate::game::scx_game::page_click(game, button);
+    }
 }
 ''')
 helper('gizmos', '''// The outlines of what was found, added to the lines drawn over everything.

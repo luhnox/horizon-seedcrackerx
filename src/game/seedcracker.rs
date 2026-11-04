@@ -6,6 +6,8 @@ use super::scx_config::{Config, RenderType};
 use super::scx_cracker_data::{BiomeSourceFactory, DataAddedEvent, HashedSeedData, Host};
 use super::scx_cracker_storage::DataStorage;
 use super::scx_cracker_time_machine::Phase;
+use super::scx_database::{self, Database};
+use super::scx_structure_save;
 use super::scx_dimension::Dimension;
 use super::scx_features::Features;
 use super::scx_finder::{Category, FinderContext, FinderQueue, FinderType, SearchPositions};
@@ -23,6 +25,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 pub const ID: &str = "seedcrackerx";
+pub const VERSION: &str = "0.1.0";
 const CONFIG_FILE: &str = "seedcracker.json";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -261,10 +264,69 @@ struct State {
     /// What the session was when last looked at: the dimension and the hash of the seed.
     session: Option<(String, i64)>,
     lines: Vec<Line>,
+    /// The sheet of server seeds, filled by a thread that fetches it at start.
+    database: Arc<Mutex<Database>>,
+    /// The name the structures of this session are saved under, and what the cracker has already told of this session.
+    session_name: Option<String>,
+    /// The seeds cracked before, by the hash the server sent: (hashed seed, seed).
+    known: Vec<(i64, i64)>,
 }
 
 thread_local! {
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
+}
+
+/// `getRemoteAddress().toString()`, as near as the game knows it.
+fn address(game: &Game<'_>) -> String {
+    game.server_address().unwrap_or("local").to_owned()
+}
+
+/// `StructureSave.getWorldName`: the file of the server, or of the world played alone.
+fn session_file_name(game: &Game<'_>) -> String {
+    match game.server_address() {
+        Some(a) if game.remote.is_some() => scx_structure_save::file_name(a),
+        _ => scx_structure_save::file_name(&format!("world_{}", game.level.seed)),
+    }
+}
+
+fn structures_dir(game: &Game<'_>) -> std::path::PathBuf {
+    game.native_data_dir(ID).join("SeedCracker saved structures")
+}
+
+/// `StructureSave.saveStructures`.
+fn save_structures(game: &Game<'_>, name: &str, data: &[super::scx_feature::FeatureData]) {
+    let dir = structures_dir(game);
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join(name), scx_structure_save::to_text(data));
+}
+
+/// `StructureSave.loadStructures`.
+fn load_structures(game: &Game<'_>, name: &str, features: &Features) -> Vec<super::scx_feature::FeatureData> {
+    match std::fs::read_to_string(structures_dir(game).join(name)) {
+        Ok(text) => scx_structure_save::from_text(&text, &features.structure_types),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn known_path(game: &Game<'_>) -> std::path::PathBuf {
+    game.native_data_dir(ID).join("known_seeds.txt")
+}
+
+/// The seeds cracked on earlier visits: a line of the hash the server sent, the seed and the server.
+fn load_known(game: &Game<'_>) -> Vec<(i64, i64)> {
+    let text = std::fs::read_to_string(known_path(game)).unwrap_or_default();
+    text.lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            Some((f.first()?.parse().ok()?, f.get(1)?.parse().ok()?))
+        })
+        .collect()
+}
+
+fn save_known(game: &Game<'_>, known: &[(i64, i64)], address: &str) {
+    let _ = std::fs::create_dir_all(game.native_data_dir(ID));
+    let text: String = known.iter().map(|(h, s)| format!("{h}\t{s}\t{address}\n")).collect();
+    let _ = std::fs::write(known_path(game), text);
 }
 
 fn config_path(game: &Game<'_>) -> std::path::PathBuf {
@@ -300,7 +362,23 @@ impl State {
             last_refresh: 0,
             session: None,
             lines: Vec::new(),
+            database: Arc::new(Mutex::new(Database::default())),
+            session_name: None,
+            known: load_known(game),
         }
+    }
+
+    /// `Database.fetchSeeds`: the sheet, read in the background when the mod starts.
+    fn fetch_database(&self) {
+        let database = self.database.clone();
+        std::thread::spawn(move || {
+            let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(10)).build();
+            if let Ok(response) = agent.get(scx_database::DATABASE_URL).set("User-Agent", scx_database::USER_AGENT).call() {
+                if let Ok(csv) = response.into_string() {
+                    lock(&database).parse_csv(&csv);
+                }
+            }
+        });
     }
 
     fn finder_context(&self) -> Option<Arc<FinderContext>> {
@@ -353,8 +431,13 @@ impl State {
 
     /// Looks at the game: a new dimension or seed, and the chunks that arrived.
     fn poll(&mut self, game: &Game<'_>) {
+        *lock(&self.host.language) = game.settings.language.clone();
         let Some(player) = game.native_player() else {
             if self.session.take().is_some() {
+                // ClientLevelMixin.disconnect: the structures are saved and everything is forgotten.
+                if let Some(name) = self.session_name.take() {
+                    save_structures(game, &name, &self.storage.base_data());
+                }
                 self.reset();
             }
             return;
@@ -367,9 +450,75 @@ impl State {
         if self.session.as_ref() != Some(&key) {
             let dimension_change = self.session.is_some();
             self.new_dimension(game, &key.0, hashed, dimension_change);
+            if !dimension_change {
+                // ClientPacketListenerMixin.onGameJoin: the structures of the last visit are on offer.
+                let name = session_file_name(game);
+                let saved = load_structures(game, &name, &self.features);
+                if !saved.is_empty() {
+                    self.host.warn("foundRestorableStructures", &[saved.len().to_string()]);
+                }
+                self.session_name = Some(name);
+            }
+            self.try_database(game, hashed);
             self.session = Some(key);
         }
         self.sync_chunks(game);
+    }
+
+    /// `tryDatabase`: the seed of this server, from what was cracked here before or from the sheet.
+    fn try_database(&self, game: &Game<'_>, hashed: i64) {
+        let from_file = self.known.iter().find(|(h, _)| *h == hashed).map(|(_, seed)| *seed);
+        let from_sheet = || lock(&self.database).get_seed(&address(game), hashed);
+        if let Some(seed) = from_file.or_else(from_sheet) {
+            self.host.print_seed("tmachine.foundWorldSeedFromDatabase", seed);
+        }
+    }
+
+    /// What the TimeMachine found: kept for this server, and sent to the database when the player asked for that.
+    fn take_found(&mut self, game: &Game<'_>) {
+        let found = std::mem::take(&mut *lock(&self.host.found));
+        for seed in found {
+            if let Some((hashed, _)) = self.session.as_ref().map(|(_, h)| (*h, ())) {
+                if !self.known.iter().any(|(h, sd)| *h == hashed && *sd == seed) {
+                    self.known.push((hashed, seed));
+                    save_known(game, &self.known, &address(game));
+                }
+            }
+            let (submits, anonymous, version) = {
+                let c = lock(&self.config);
+                (c.database_submits, c.anonymus_submits, c.get_version())
+            };
+            let players = game.remote_online_names().map_or(0, |names| names.len());
+            if submits && players > 10 && game.remote.is_some() {
+                let dimension = self.session.as_ref().map_or("overworld".to_owned(), |(d, _)| d.trim_start_matches("minecraft:").to_owned());
+                self.submit_seed(game, seed, dimension, version, anonymous);
+            }
+        }
+    }
+
+    /// `Database.joinFakeServerForAuth` and `handleDatabaseCall`: the player proves who they are to Mojang's session service
+    /// under the id `seedcrackerx`, and the seed is posted to the sheet's script.
+    fn submit_seed(&self, game: &Game<'_>, seed: i64, dimension: String, version: MCVersion, anonymous: bool) {
+        let Some(session) = horizon_client::auth::current() else { return };
+        let (server_ip, username) = (address(game), session.name.clone());
+        let host = self.host.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = horizon_client::auth::join_server(&session, scx_database::AUTH_SERVER_ID) {
+                let reason = match e {
+                    horizon_client::auth::JoinError::Unavailable => "The authentication servers are currently not reachable. Please try again.".to_owned(),
+                    horizon_client::auth::JoinError::InsufficientPrivileges => "Multiplayer is disabled. Please check your Microsoft account settings.".to_owned(),
+                    other => format!("{other:?}"),
+                };
+                host.error(&format!("Failed to log in: {reason}"));
+                return;
+            }
+            let body = scx_database::post_body(&server_ip, &dimension, seed, version.name(), &username, anonymous);
+            let agent = ureq::AgentBuilder::new().redirects(0).timeout(std::time::Duration::from_secs(10)).build();
+            let sent = agent.post(scx_database::DATABASE_POST_URL).set("User-Agent", scx_database::USER_AGENT).set("Content-Type", "application/x-www-form-urlencoded").send_string(&body);
+            // The page says "document moved" but the post is processed: a 302 is the answer that means it was.
+            let moved = matches!(&sent, Ok(r) if r.status() == 302) || matches!(&sent, Err(ureq::Error::Status(302, _)));
+            host.warn(if moved { "database.success" } else { "database.fail" }, &[]);
+        });
     }
 
     fn sync_chunks(&mut self, game: &Game<'_>) {
@@ -477,7 +626,11 @@ fn say(game: &mut Game<'_>, line: Text) {
 }
 
 fn with<R>(game: &mut Game<'_>, f: impl FnOnce(&mut State, &mut Game<'_>) -> R) -> R {
-    let mut state = STATE.with(|s| s.borrow_mut().take()).unwrap_or_else(|| State::new(game));
+    let mut state = STATE.with(|s| s.borrow_mut().take()).unwrap_or_else(|| {
+        let state = State::new(game);
+        state.fetch_database();
+        state
+    });
     let out = f(&mut state, game);
     STATE.with(|s| *s.borrow_mut() = Some(state));
     out
@@ -515,6 +668,7 @@ pub fn add_lines(gizmos: &mut horizon_client::gizmos::Gizmos) {
 pub fn tick(game: &mut Game<'_>) {
     with(game, |s, game| {
         s.poll(game);
+        s.take_found(game);
         s.flush(game);
         let _ = s.storage.tick();
     });
@@ -588,6 +742,26 @@ fn run_command(s: &mut State, game: &mut Game<'_>, args: &[&str]) {
             }
             _ => unknown(game),
         },
+        ["data", "restore"] => {
+            let name = session_file_name(game);
+            let preloaded = load_structures(game, &name, &s.features);
+            if preloaded.is_empty() {
+                s.host.warn("data.restoreFailed", &[]);
+            } else {
+                let count = preloaded.len();
+                for data in preloaded {
+                    let event: DataAddedEvent = Arc::new(|st: &DataStorage| st.get_time_machine().poke(st, Some(Phase::Lifting)));
+                    s.storage.add_base_data(data, event);
+                }
+                s.host.warn("data.restoreStructures", &[count.to_string()]);
+            }
+        }
+        ["database"] => open_uri(scx_database::DATABASE_PAGE_URL),
+        ["gui"] => {
+            // The config screen is the page of this mod in Options > Mods.
+            game.open_options(false);
+            game.ui.options.show(horizon_client::options_ui::Page::Mods);
+        }
         ["data", "clear"] => {
             s.reset();
             feedback(game, translate(s, "data.clearData"), text::GREEN);
@@ -698,3 +872,117 @@ fn reload_finders(s: &mut State, game: &Game<'_>) {
     }
     s.run_finders(&chunks);
 }
+
+/// `Blaze3D.openUri`: the address in the default browser.
+fn open_uri(uri: &str) {
+    let mut command = if cfg!(target_os = "windows") {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler").arg(uri);
+        c
+    } else if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("open");
+        c.arg(uri);
+        c
+    } else {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(uri);
+        c
+    };
+    command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let _ = command.spawn();
+}
+
+// Options > Mods > SeedCrackerX: the screen of the Java's Cloth config, a button for each entry.
+
+fn on_off(flag: bool) -> &'static str {
+    if flag { "ON" } else { "OFF" }
+}
+
+/// The versions the screen offers (`getSupportedVersions`).
+fn supported_versions() -> Vec<MCVersion> {
+    MCVersion::values().iter().copied().filter(|v| v.is_newer_or_equal_to(MCVersion::v1_8)).collect()
+}
+
+/// The labels of the page, in the order of the Java's screen: settings, the toggles of the finders, then the info.
+pub fn page_labels(game: &mut Game<'_>) -> Vec<String> {
+    with(game, |s, _| {
+        let t = |key: &str| s.host.translate(key);
+        let c = lock(&s.config);
+        let mut labels = vec![
+            format!("{}: {}", t("settings.active"), on_off(c.active)),
+            format!("{}: {}", t("settings.database"), on_off(c.database_submits)),
+            format!("{}: {}", t("settings.hideNameDatabase"), on_off(c.anonymus_submits)),
+            t("settings.openDatabase"),
+            format!("{}: {}", t("settings.version"), c.get_version()),
+            format!("{}: {}", t("settings.outline"), c.render.name()),
+        ];
+        for finder in FinderType::ALL {
+            labels.push(format!("{}: {}", t(finder.name_key()), on_off(finder.enabled(&c).get())));
+        }
+        labels.push(format!("{}: {}", t("settings.antiXrayMode"), on_off(c.anti_xray_bypass)));
+        drop(c);
+        labels.push(t("info.clearData"));
+        let tm = s.storage.get_time_machine();
+        let list = |seeds: Vec<i64>, none: &str, title: &str| {
+            if seeds.is_empty() { t(none) } else { format!("{}: {}", t(title), seeds.iter().map(i64::to_string).collect::<Vec<_>>().join(", ")) }
+        };
+        let mut world: Vec<i64> = tm.world_seeds().into_iter().collect();
+        world.sort_unstable();
+        let mut structure: Vec<i64> = tm.structure_seeds().into_iter().collect();
+        structure.sort_unstable();
+        labels.push(list(world, "info.noWorldSeeds", "info.worldSeeds"));
+        labels.push(list(structure, "info.noStructureSeeds", "info.structureSeeds"));
+        labels
+    })
+}
+
+/// A click on the page: the same order as `page_labels`.
+pub fn page_click(game: &mut Game<'_>, button: usize) {
+    with(game, |s, game| {
+        let finders = FinderType::ALL.len();
+        {
+            let mut c = lock(&s.config);
+            match button {
+                0 => c.active = !c.active,
+                1 => c.database_submits = !c.database_submits,
+                2 => c.anonymus_submits = !c.anonymus_submits,
+                4 => {
+                    let versions = supported_versions();
+                    let at = versions.iter().position(|v| *v == c.get_version()).unwrap_or(0);
+                    let next = versions[(at + 1) % versions.len()];
+                    drop(c);
+                    set_version(s, game, next);
+                    save_config(game, &lock(&s.config));
+                    return;
+                }
+                5 => {
+                    let all = RenderType::ALL;
+                    let at = all.iter().position(|r| *r == c.render).unwrap_or(0);
+                    c.render = all[(at + 1) % all.len()];
+                }
+                n if (6..6 + finders).contains(&n) => {
+                    let toggle = FinderType::ALL[n - 6].enabled(&c);
+                    toggle.set(!toggle.get());
+                }
+                n if n == 6 + finders => c.anti_xray_bypass = !c.anti_xray_bypass,
+                _ => {}
+            }
+        }
+        match button {
+            3 => open_uri(scx_database::DATABASE_PAGE_URL),
+            n if n == 7 + finders => {
+                s.reset();
+                s.host.warn("data.clearData", &[]);
+            }
+            _ => {}
+        }
+        save_config(game, &lock(&s.config));
+    });
+}
+
+/// Its row in Options > Mods.
+pub fn listed() -> (String, String, String) {
+    (ID.to_owned(), format!("SeedCrackerX {VERSION}"), DESCRIPTION.to_owned())
+}
+
+pub const DESCRIPTION: &str = "A port of SeedCrackerX: finds structures as you play and cracks the world seed of the server.";

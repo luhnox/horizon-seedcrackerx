@@ -70,6 +70,16 @@ pub struct PieceFinder {
     pub search_positions: Arc<Vec<BlockPos>>,
 }
 
+/// Not in the Java: a plant the decoration puts on the ground after the structure, where the structure holds air. The Java
+/// compares the block exactly, so one dead bush or (since 1.21.5) a tuft of dry grass in front of a pyramid made it miss
+/// the whole structure; a plant over an air cell says nothing against the structure, so it counts as air here.
+fn is_decoration_plant(block: &str) -> bool {
+    matches!(
+        block,
+        "short_grass" | "tall_grass" | "fern" | "large_fern" | "dead_bush" | "short_dry_grass" | "tall_dry_grass" | "cactus" | "bush" | "firefly_bush" | "leaf_litter" | "wildflowers"
+    )
+}
+
 impl PieceFinder {
     pub fn new(kind: PieceKind, facing: Option<Direction>, size: [i32; 3]) -> PieceFinder {
         let (min, max) = match facing {
@@ -104,7 +114,8 @@ impl PieceFinder {
             let base = origin.offset_pos(*center);
             let found = self.structure.iter().all(|(key, block)| {
                 let pos = base.offset_pos(*key);
-                level.block(pos.x, pos.y, pos.z) == *block
+                let actual = level.block(pos.x, pos.y, pos.z);
+                actual == *block || (*block == "air" && is_decoration_plant(actual))
             });
             if found {
                 result.push(base);
