@@ -286,3 +286,31 @@ fn messages_are_the_language_files() {
     assert_ne!(translate("ru_ru", "settings.active"), "");
     assert_eq!(format(&translate("en_us", "data.collectedBits"), &["12".into(), "32".into()]), "You currently have collected 12 bits out of 32.");
 }
+
+#[test]
+fn structures_are_saved_and_restored_by_name() {
+    use horizon_seedcrackerx::scx_feature::FeatureData;
+    use horizon_seedcrackerx::scx_structure_save::{file_name, from_text, to_text};
+    let features = Features::init(MCVersion::latest(), &Config::default(), &|_| {});
+    let igloo = features.igloo.clone().unwrap();
+    let wreck = features.shipwreck.clone().unwrap();
+    let data = vec![FeatureData::structure(&igloo, 12, -7), FeatureData::structure(&wreck, -300, 41)];
+    let text = to_text(&data);
+    assert_eq!(text, "igloo;12;-7\nshipwreck;-300;41\n");
+    let back = from_text(&format!("{text}nonsense\nvillage;1;2;3\nigloo;x;2\nwhale;5;5\n"), &features.structure_types);
+    assert_eq!(back.len(), 2);
+    assert_eq!((back[0].chunk_x, back[0].chunk_z, back[0].feature.name()), (12, -7, "igloo"));
+    assert_eq!(file_name("/127.0.0.1:25565"), "_127.0.0.1_25565.txt");
+}
+
+#[test]
+fn the_database_sheet_is_read_by_address_then_by_hash() {
+    use horizon_seedcrackerx::scx_database::{post_body, Database};
+    let mut db = Database::default();
+    db.parse_csv("ip,dim,seed,version,user,hash,hashed\nplay.example.net/1.2.3.4:25565,overworld,123456789L,1.21,x,0,-777\nshort,row\nbad,overworld,xL,1.21,x,0,5\nother,overworld,-42L,1.21,x,0,31337\n");
+    assert_eq!(db.len(), 2);
+    assert_eq!(db.get_seed("play.example.net/1.2.3.4:25565", 0), Some(123456789));
+    assert_eq!(db.get_seed("elsewhere", 31337), Some(-42));
+    assert_eq!(db.get_seed("elsewhere", 1), None);
+    assert_eq!(post_body("a b/1:2", "overworld", -5, "1.21.3", "Steve", true), "serverIp=a+b%2F1%3A2&dimension=overworld&seed=-5L&version=1.21.3&username=Steve&hash=1");
+}

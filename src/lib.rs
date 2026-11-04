@@ -48,5 +48,11 @@ pub mod scx_finders;
 #[path = "config/lang.rs"]
 pub mod scx_lang;
 
+#[path = "config/structure_save.rs"]
+pub mod scx_structure_save;
+
+#[path = "config/database.rs"]
+pub mod scx_database;
+
 #[cfg(test)]
 mod tests;
