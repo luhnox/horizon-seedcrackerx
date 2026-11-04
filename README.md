@@ -32,8 +32,18 @@ The settings are kept in `seedcracker.json` of the mod's data folder (the Java's
 
 ## Install
 
-Download `seedcrackerx.hnmod` from the latest release and install it in the launcher's native mods. The launcher builds it into a game
-of its own (10 to 30 minutes the first time). It runs native code with your rights: read the source first.
+A mod is built into the Horizon commit it is pinned to, so pick the download by the Nightly the launcher shows for your game
+(Versions tab). Every release is titled `SeedCrackerX <version> for Nightly <date>` and its file is named
+`seedcrackerx-<version>-nightly-<date>.hnmod`.
+
+| Your Nightly | Horizon commit | SeedCrackerX | Download |
+|---|---|---|---|
+| 2026-11-04 | `3fb4c31` | the latest | [latest release](https://github.com/luhnox/horizon-seedcrackerx/releases/latest) |
+
+A Nightly that is not in the table has no build yet: the mod reads the game's private state, so a new Nightly needs it ported.
+
+Install the file in the launcher's native mods. The launcher builds it into a game of its own (10 to 30 minutes the first time).
+It runs native code with your rights: read the source first.
 
 ## Build and test
 
