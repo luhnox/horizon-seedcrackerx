@@ -1,6 +1,6 @@
 [mod]
 id = "seedcrackerx"
-version = "0.1.0"
+version = "0.2.0"
 priority = 90
 
 # The Nightly this was written against: the Horizon the instance plays. It reads the game's world and the seed the server
