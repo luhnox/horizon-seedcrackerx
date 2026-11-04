@@ -23,5 +23,12 @@ pub mod scx_worldgen_random;
 #[path = "feature/feature.rs"]
 pub mod scx_feature;
 
+#[path = "cracker/data.rs"]
+pub mod scx_cracker_data;
+#[path = "cracker/storage.rs"]
+pub mod scx_cracker_storage;
+#[path = "cracker/time_machine.rs"]
+pub mod scx_cracker_time_machine;
+
 #[cfg(test)]
 mod tests;
