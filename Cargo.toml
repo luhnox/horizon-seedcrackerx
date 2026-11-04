@@ -1,0 +1,15 @@
+[package]
+name = "horizon-seedcrackerx"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The parts of SeedCrackerX that use no game types (the seed arithmetic, the structure tables, the cracker) build and
+# test on their own: `cargo test` in this folder. Everything else is spliced into the game by horizon-mixins
+# (see horizon-mixin.toml).
+[lib]
+path = "src/lib.rs"
+
+# The cracker searches billions of seeds; its tests need an optimised build to finish in seconds.
+[profile.test]
+opt-level = 3
