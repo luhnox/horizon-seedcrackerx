@@ -45,5 +45,8 @@ pub mod scx_finder;
 #[path = "finder/finders.rs"]
 pub mod scx_finders;
 
+#[path = "config/lang.rs"]
+pub mod scx_lang;
+
 #[cfg(test)]
 mod tests;

@@ -276,3 +276,13 @@ fn a_shipwreck_is_not_a_chest_in_the_open() {
     let _ = Detail::Region;
     let _ = Feature::Structure;
 }
+
+#[test]
+fn messages_are_the_language_files() {
+    use horizon_seedcrackerx::scx_lang::{format, translate};
+    assert_eq!(translate("en_us", "tmachine.lookingForPillarSeed"), "Looking for pillar seeds...");
+    // A key a language lacks falls back to English, and a key nobody has is itself.
+    assert_eq!(translate("zh_cn", "no.such.key"), "no.such.key");
+    assert_ne!(translate("ru_ru", "settings.active"), "");
+    assert_eq!(format(&translate("en_us", "data.collectedBits"), &["12".into(), "32".into()]), "You currently have collected 12 bits out of 32.");
+}
