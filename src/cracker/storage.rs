@@ -2,7 +2,7 @@
 // adds up to, and the queue of what runs when more arrives. The game's part of `tick` (the config screen opening, the
 // BlockUpdateQueue) is the game's; `tick` here is the part that hands the queue to the TimeMachine.
 use super::scx_cracker_data::{BiomeEntry, DataAddedEvent, FeatureEntry, HashedSeedData, Host, PillarData, ScheduledSet};
-use super::scx_cracker_time_machine::{Phase, TimeMachine};
+use super::scx_cracker_time_machine::TimeMachine;
 use super::scx_feature::{DecoratorClass, Feature, FeatureData, RegionShape, StructureClass};
 use super::scx_version::MCVersion;
 use std::cmp::Ordering;

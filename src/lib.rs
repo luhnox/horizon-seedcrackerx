@@ -30,5 +30,20 @@ pub mod scx_cracker_storage;
 #[path = "cracker/time_machine.rs"]
 pub mod scx_cracker_time_machine;
 
+#[path = "config/config.rs"]
+pub mod scx_config;
+#[path = "feature/features.rs"]
+pub mod scx_features;
+#[path = "finder/level.rs"]
+pub mod scx_level;
+#[path = "finder/piece.rs"]
+pub mod scx_finder_piece;
+#[path = "finder/structures_dsl.rs"]
+pub mod scx_finder_structures;
+#[path = "finder/finder.rs"]
+pub mod scx_finder;
+#[path = "finder/finders.rs"]
+pub mod scx_finders;
+
 #[cfg(test)]
 mod tests;

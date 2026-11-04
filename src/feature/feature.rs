@@ -520,11 +520,11 @@ pub struct DungeonData {
     pub block_x: i32,
     pub offset_z: i32,
     pub block_z: i32,
-    pub size: [i32; 3],
+    pub size: Option<[i32; 3]>,
     pub floor_calls: Option<Vec<i32>>,
     pub block_y: i32,
     pub bits_count: f32,
-    pub height_context: HeightContext,
+    pub height_context: Option<HeightContext>,
 }
 
 pub const COBBLESTONE_CALL: i32 = 0;
@@ -538,24 +538,36 @@ impl DungeonData {
     }
 }
 
-/// `HeightContext`: the height of the dimension, from the bottom `bottom_y`.
+/// `HeightContext` (util): the dimension from its lowest block `minY` up to `maxY`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HeightContext {
-    pub height: i32,
     pub bottom_y: i32,
+    pub top_y: i32,
 }
 
 impl HeightContext {
-    pub fn get_height(&self) -> i32 {
-        self.height
+    pub fn new(min_y: i32, max_y: i32) -> HeightContext {
+        HeightContext { bottom_y: min_y, top_y: max_y }
+    }
+
+    pub fn get_top_y(&self) -> i32 {
+        self.top_y
     }
 
     pub fn get_bottom_y(&self) -> i32 {
         self.bottom_y
     }
 
+    pub fn get_height(&self) -> i32 {
+        self.top_y - self.bottom_y
+    }
+
     pub fn get_distance_to_bottom(&self, y: i32) -> i32 {
         y - self.bottom_y
+    }
+
+    pub fn get_distance_to_top(&self, y: i32) -> i32 {
+        self.top_y - y - 1
     }
 }
 
@@ -668,7 +680,7 @@ impl FeatureData {
 
     /// `Dungeon.at(blockX, blockY, blockZ, size, floorCalls, biome, heightContext)`.
     #[allow(clippy::too_many_arguments)]
-    pub fn dungeon(feature: &Arc<Feature>, block_x: i32, block_y: i32, block_z: i32, size: [i32; 3], floor_calls: Option<Vec<i32>>, biome: Option<i32>, height_context: HeightContext) -> FeatureData {
+    pub fn dungeon(feature: &Arc<Feature>, block_x: i32, block_y: i32, block_z: i32, size: Option<[i32; 3]>, floor_calls: Option<Vec<i32>>, biome: Option<i32>, height_context: Option<HeightContext>) -> FeatureData {
         let Feature::Decorator(d) = &**feature else { panic!("not a decorator") };
         let (mut bx, mut bz) = (block_x, block_z);
         if d.version.is_older_than(MCVersion::v1_13) {
@@ -725,7 +737,8 @@ impl Decorator {
                     } else {
                         x = rand.next_int_bound(16);
                         z = rand.next_int_bound(16);
-                        y = rand.next_int_bound(d.height_context.get_height()) + d.height_context.get_bottom_y();
+                        let hc = d.height_context.expect("a dungeon of before 1.18 knows its height");
+                        y = rand.next_int_bound(hc.get_height()) + hc.get_bottom_y();
                     }
                     if y == d.block_y && x == d.offset_x && z == d.offset_z {
                         return true;
