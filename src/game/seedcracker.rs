@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 pub const ID: &str = "seedcrackerx";
-pub const VERSION: &str = "0.2.0";
+pub const VERSION: &str = "0.2.2";
 const CONFIG_FILE: &str = "seedcracker.json";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
