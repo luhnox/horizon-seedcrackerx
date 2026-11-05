@@ -38,7 +38,7 @@ def pack(path, pin):
     entry = dict(meta, horizon=pin)
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr(zipfile.ZipInfo('horizon-native.json', stamp), json.dumps(entry, indent=2, sort_keys=True) + '\n')
-        for f in files + ['LICENSE']:
+        for f in files + ['LICENSE', 'NOTICE.md']:
             # Line endings as the repository stores them (LF), whatever the checkout has: the same bytes on every machine.
             data = open(f, 'rb').read().replace(b'\r\n', b'\n')
             if f == 'horizon-mixin.toml':

@@ -24,10 +24,12 @@ The settings are kept in `seedcracker.json` of the mod's data folder (the Java's
 
 ## Network and processes
 
-- At start the mod reads the Google Sheet of known server seeds (`DATABASE_URL`). When a seed is cracked on a server with more than 10
-  players, and you have switched the database submission on, it proves your account to Mojang's session service under the id
-  `seedcrackerx` and posts the server address, dimension, seed, version and your name (or a hash) to the sheet's script. Both are
-  the Java's behavior; both can be switched off in the settings.
+- **Reading, always:** once when the mod starts it reads the Google Sheet of known server seeds (`DATABASE_URL`, one HTTP GET). The
+  Java does the same and this port has no switch for it.
+- **Sending, off until you switch it on** (`databaseSubmits`, the Java's setting): when a seed is cracked on a server with more than 10
+  players it asks the game to prove your account to Mojang's session service under the id `seedcrackerx` (the game's own `join_server`;
+  the mod never reads or stores the access token) and posts the server address, dimension, seed, version and your name (or a hash) to
+  the sheet's script.
 - `/seedcracker database` and the links on the page open your browser with the system's opener.
 
 ## Install
@@ -51,4 +53,7 @@ python tools/gen_mixin.py   # rewrites horizon-mixin.toml and hooks/ from src/li
 python tools/pack.py        # dist/seedcrackerx.hnmod
 ```
 
-MIT, as SeedCrackerX. See [LICENSE](LICENSE).
+## License
+
+MIT, like the originals it is a port of (`LICENSE`). `NOTICE.md` lists the originals and their copyright notices: SeedCrackerX, and
+the SeedFinding libraries it calls.
